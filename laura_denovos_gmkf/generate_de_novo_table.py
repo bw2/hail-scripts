@@ -46,10 +46,9 @@ for data_label in args.data_label:
     mt_path = os.path.join(BASE_DIR, f"{data_label}.mt")
     print(mt_path)
 
-    print(f"{data_label}: Basic filters...")
     filtered_mt = os.path.join(BASE_DIR, f"{data_label}.basic_filters.mt") 
-    if not file_exists(filtered_mt):
-
+    if force or not file_exists(filtered_mt):
+        print(f"{data_label}: Generating {filtered_mt}")
         mt = hl.import_vcf(VCF_PATH, force_bgz=True, min_partitions=10000, reference_genome="GRCh38")
 
         if data_label == "rgp":
@@ -80,9 +79,9 @@ for data_label in args.data_label:
     vcf_samples = mt.s.collect()
     imputed_sex = impute_sex(mt)
 
-    print(f"{data_label}: kinship.ht...")
     file_path = os.path.join(BASE_DIR, f"{data_label}.kinship.ht")  
     if not file_exists(file_path):
+        print(f"{data_label}: Generating {file_path}")
         kin_ht = compute_kinship_ht(mt)
         kin_ht = kin_ht.checkpoint(file_path, overwrite=force, _read_if_exists=not force)
     else:
@@ -99,9 +98,9 @@ for data_label in args.data_label:
     print(len(pedigree.complete_trios())*3)
     print(len(pedigree.complete_trios())*3/len(vcf_samples))
 
-    print(f"{data_label}: mendel denovos...")
     file_path = os.path.join(BASE_DIR, f"{data_label}.mendel_denovos.ht")
     if not file_exists(file_path):
+        print(f"{data_label}: Generating {file_path}")
         mendel_de_novos = compute_mendel_denovos(mt, pedigree)
         mendel_de_novos = mendel_de_novos.checkpoint(file_path, overwrite=True, _read_if_exists=not force)
     else:
@@ -110,21 +109,24 @@ for data_label in args.data_label:
 
     mendel_de_novos = mendel_de_novos.annotate(variant_type=get_expr_for_variant_type(mendel_de_novos))
     
-    print(f"{data_label}: vep...")
     file_path = os.path.join(BASE_DIR, f"{data_label}.mendel_denovos.vep.ht")
     if not file_exists(file_path):
+        print(f"{data_label}: Generating {file_path}")
         mendel_de_novos = mendel_de_novos.key_by('locus', 'alleles')
         mendel_de_novos = hl.vep(mendel_de_novos, "file:///vep_data/vep-gcloud.json", name="vep", block_size=100)
-        
-        mendel_de_novos = mendel_de_novos.annotate(sortedTranscriptConsequences = get_expr_for_vep_sorted_transcript_consequences_array(mendel_de_novos.vep))
-        mendel_de_novos = mendel_de_novos.annotate(transcript_consequence_categories = mendel_de_novos.sortedTranscriptConsequences.map(lambda c: c.category)[0])
         
         mendel_de_novos = mendel_de_novos.checkpoint(file_path, overwrite=True, _read_if_exists=not force)
     else:
         print(f"Reading table {file_path}")
         mendel_de_novos = hl.read_table(file_path)
+
+    file_path = os.path.join(BASE_DIR, f"{data_label}.mendel_errors.de_novos_table.tsv")
+
+    print(f"{data_label}: annotate and export {file_path}")
+    mendel_de_novos = mendel_de_novos.annotate(sorted_transcript_consequences = get_expr_for_vep_sorted_transcript_consequences_array(mendel_de_novos.vep))
+    mendel_de_novos = mendel_de_novos.annotate(transcript_consequence_categories = mendel_de_novos.sorted_transcript_consequences.map(lambda c: c.category))
+    mendel_de_novos = mendel_de_novos.annotate(transcript_consequence_category = hl.cond(hl.len(mendel_de_novos.transcript_consequence_categories) > 0, mendel_de_novos.transcript_consequence_categories[0], "other"))
         
-    print(f"{data_label}: annotate and export {data_label}.mendel_errors.de_novos_table.tsv...")
     joined_mt_rows = mt.rows()[(mendel_de_novos.locus, mendel_de_novos.alleles)]
 
     mendel_de_novos = mendel_de_novos.annotate(
@@ -134,7 +136,7 @@ for data_label in args.data_label:
         AF=joined_mt_rows.info.AF, 
         QD=joined_mt_rows.info.QD)
     
-    mendel_de_novos = mendel_de_novos.select('s', 'mendel_code', 'variant_type', 'AC', 'AF', 'QD', 'transcript_consequence_categories', 'in_LCR', 'in_segdup') 
-    mendel_de_novos.export(os.path.join(BASE_DIR, f"{data_label}.mendel_errors.de_novos_table.tsv"))
+    mendel_de_novos = mendel_de_novos.select('s', 'mendel_code', 'variant_type', 'AC', 'AF', 'QD', 'transcript_consequence_category', 'in_LCR', 'in_segdup')
+    mendel_de_novos.export(file_path)
 
     print(f"Done with {data_label}!")
