@@ -11,7 +11,7 @@ print(subprocess.check_output(
     shell=True, encoding="UTF-8"))
 
 from hail_utils.vep import compute_derived_vep_fields, get_expr_for_vep_sorted_transcript_consequences_array
-from hail_utils.info_fields import recompute_AC_AN_AF
+from hail_utils.info_fields import recompute_AC_AN_AF, annotate_in_LCR, annotate_in_segdup
 from hail_utils.filters import filter_out_variants_where_all_samples_are_hom_ref, filter_out_LCRs, filter_out_segdups, filter_to_autosomes
 from hail_utils.variants import get_expr_for_variant_type
 from hail_utils.io import file_exists
@@ -59,11 +59,13 @@ for data_label in args.data_label:
         mt = filter_out_variants_where_all_samples_are_hom_ref(mt)
         mt = hl.split_multi_hts(mt)
         mt = recompute_AC_AN_AF(mt)
-
-        mt = filter_out_LCRs(mt)
-        mt = filter_out_segdups(mt)
         mt = filter_to_adj(mt)
 
+        #mt = filter_out_LCRs(mt)
+        #mt = filter_out_segdups(mt)
+        mt = annotate_in_LCR(mt)
+        mt = annotate_in_segdup(mt)
+    
         mt = mt.checkpoint(filtered_mt, overwrite=force, _read_if_exists=not force)
 
     else:
@@ -126,11 +128,13 @@ for data_label in args.data_label:
     joined_mt_rows = mt.rows()[(mendel_de_novos.locus, mendel_de_novos.alleles)]
 
     mendel_de_novos = mendel_de_novos.annotate(
+        in_LCR=joined_mt_rows.info.in_LCR,
+        in_segdup=joined_mt_rows.info.in_segdup,
         AC=joined_mt_rows.info.AC,
         AF=joined_mt_rows.info.AF, 
         QD=joined_mt_rows.info.QD)
     
-    mendel_de_novos = mendel_de_novos.select('s', 'mendel_code', 'variant_type', 'AC', 'AF', 'QD', 'transcript_consequence_categories') 
+    mendel_de_novos = mendel_de_novos.select('s', 'mendel_code', 'variant_type', 'AC', 'AF', 'QD', 'transcript_consequence_categories', 'in_LCR', 'in_segdup') 
     mendel_de_novos.export(os.path.join(BASE_DIR, f"{data_label}.mendel_errors.de_novos_table.tsv"))
 
     print(f"Done with {data_label}!")
