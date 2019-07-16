@@ -16,7 +16,7 @@ from hail_utils.filters import filter_out_variants_where_all_samples_are_hom_ref
 from hail_utils.variants import get_expr_for_variant_type
 from hail_utils.io import file_exists
 from hail_utils.infer_pedigree import impute_sex, compute_kinship_ht, infer_families, get_duplicated_samples_ibd
-from hail_utils.denovos import compute_mendel_denovos
+from hail_utils.denovos import compute_mendel_denovos, compute_samocha_denovos
 
 import argparse
 
@@ -52,7 +52,7 @@ for data_label in args.data_label:
         mt = hl.import_vcf(VCF_PATH, force_bgz=True, min_partitions=10000, reference_genome="GRCh38")
 
         if data_label == "rgp":
-            samples_to_keep = {s for s in mt.s.collect() if "RGP" in s.upper()}
+            samples_to_keep = hl.set({s for s in mt.s.collect() if "RGP" in s.upper()})
             mt = mt.filter_cols(samples_to_keep.contains(mt['s']), keep=True)
 
         mt = filter_out_variants_where_all_samples_are_hom_ref(mt)
@@ -98,45 +98,55 @@ for data_label in args.data_label:
     print(len(pedigree.complete_trios())*3)
     print(len(pedigree.complete_trios())*3/len(vcf_samples))
 
-    file_path = os.path.join(BASE_DIR, f"{data_label}.mendel_denovos.ht")
-    if not file_exists(file_path):
-        print(f"{data_label}: Generating {file_path}")
-        mendel_de_novos = compute_mendel_denovos(mt, pedigree)
-        mendel_de_novos = mendel_de_novos.checkpoint(file_path, overwrite=True, _read_if_exists=not force)
-    else:
-        print(f"Reading table {file_path}")
-        mendel_de_novos = hl.read_table(file_path)
+    #file_path = os.path.join(BASE_DIR, f"{data_label}.mendel_denovos.ht")
+    #if not file_exists(file_path):
+    #    print(f"{data_label}: Generating {file_path}")
+    #    denovos = compute_mendel_denovos(mt, pedigree)
+    #    denovos = denovos.checkpoint(file_path, overwrite=True, _read_if_exists=not force)
+    #else:
+    #    print(f"Reading table {file_path}")
+    #    denovos = hl.read_table(file_path)
 
-    mendel_de_novos = mendel_de_novos.annotate(variant_type=get_expr_for_variant_type(mendel_de_novos))
-    
-    file_path = os.path.join(BASE_DIR, f"{data_label}.mendel_denovos.vep.ht")
-    if not file_exists(file_path):
-        print(f"{data_label}: Generating {file_path}")
-        mendel_de_novos = mendel_de_novos.key_by('locus', 'alleles')
-        mendel_de_novos = hl.vep(mendel_de_novos, "file:///vep_data/vep-gcloud.json", name="vep", block_size=100)
+    file_path = os.path.join(BASE_DIR, f"{data_label}.samocha_denovos.ht")
+    denovos = compute_samocha_denovos(mt, pedigree)
+
+    #file_path = os.path.join(BASE_DIR, f"{data_label}.mendel_denovos.vep.ht")
+    #if not file_exists(file_path):
+    #    print(f"{data_label}: Generating {file_path}")
+    #    denovos = denovos.key_by('locus', 'alleles')
+    #    denovos = hl.vep(denovos, "file:///vep_data/vep-gcloud.json", name="vep", block_size=100)
+    #
+    #    denovos = denovos.checkpoint(file_path, overwrite=True, _read_if_exists=not force)
+    #else:
+    #    print(f"Reading table {file_path}")
+    #    denovos = hl.read_table(file_path)
+
+
+    #print(f"{data_label}: annotate and export {file_path}")
+    #denovos = denovos.annotate(sorted_transcript_consequences = get_expr_for_vep_sorted_transcript_consequences_array(denovos.vep))
+    #denovos = denovos.annotate(transcript_consequence_categories = denovos.sorted_transcript_consequences.map(lambda c: c.category))
+    #denovos = denovos.annotate(transcript_consequence_category = hl.cond(hl.len(denovos.transcript_consequence_categories) > 0, denovos.transcript_consequence_categories[0], "other"))
         
-        mendel_de_novos = mendel_de_novos.checkpoint(file_path, overwrite=True, _read_if_exists=not force)
-    else:
-        print(f"Reading table {file_path}")
-        mendel_de_novos = hl.read_table(file_path)
+    joined_mt_rows = mt.rows()[(denovos.locus, denovos.alleles)]
 
-    file_path = os.path.join(BASE_DIR, f"{data_label}.mendel_errors.de_novos_table.tsv")
-
-    print(f"{data_label}: annotate and export {file_path}")
-    mendel_de_novos = mendel_de_novos.annotate(sorted_transcript_consequences = get_expr_for_vep_sorted_transcript_consequences_array(mendel_de_novos.vep))
-    mendel_de_novos = mendel_de_novos.annotate(transcript_consequence_categories = mendel_de_novos.sorted_transcript_consequences.map(lambda c: c.category))
-    mendel_de_novos = mendel_de_novos.annotate(transcript_consequence_category = hl.cond(hl.len(mendel_de_novos.transcript_consequence_categories) > 0, mendel_de_novos.transcript_consequence_categories[0], "other"))
-        
-    joined_mt_rows = mt.rows()[(mendel_de_novos.locus, mendel_de_novos.alleles)]
-
-    mendel_de_novos = mendel_de_novos.annotate(
+    file_path = os.path.join(BASE_DIR, f"{data_label}.de_novos_table.tsv")
+    denovos = denovos.annotate(
+        dataset=data_label,
+        variant_type=get_expr_for_variant_type(denovos),
         in_LCR=joined_mt_rows.info.in_LCR,
         in_segdup=joined_mt_rows.info.in_segdup,
         AC=joined_mt_rows.info.AC,
         AF=joined_mt_rows.info.AF, 
         QD=joined_mt_rows.info.QD)
-    
-    mendel_de_novos = mendel_de_novos.select('s', 'mendel_code', 'variant_type', 'AC', 'AF', 'QD', 'transcript_consequence_category', 'in_LCR', 'in_segdup')
-    mendel_de_novos.export(file_path)
+
+    denovos = denovos.key_by()
+    denovos = denovos.select(
+        's', 'variant_type', 'AC', 'AF', 'QD', 'transcript_consequence_category', 'in_LCR', 'in_segdup',
+        #'mendel_code',
+        'proband_AB', 'proband_DP', 'proband_GQ',
+        'mother_AB', 'mother_DP', 'mother_GQ',
+        'father_AB', 'father_DP', 'father_GQ')
+
+    denovos.export(file_path)
 
     print(f"Done with {data_label}!")
