@@ -52,7 +52,7 @@ for data_label in args.data_label:
         mt = hl.import_vcf(VCF_PATH, force_bgz=True, min_partitions=10000, reference_genome="GRCh38")
 
         if data_label == "rgp":
-            samples_to_keep = {s for s in mt.s.collect() if s.contains("RGP")}
+            samples_to_keep = {s for s in mt.s.collect() if "RGP" in s.upper()}
             mt = mt.filter_cols(samples_to_keep.contains(mt['s']), keep=True)
 
         mt = filter_out_variants_where_all_samples_are_hom_ref(mt)
