@@ -22,6 +22,7 @@ import argparse
 
 p = argparse.ArgumentParser()
 p.add_argument("--force", action="store_true")
+p.add_argument("--mendelian", action="store_true")
 p.add_argument("data_label", nargs="+", choices=["pcr_free", "pcr_plus", "rgp"])
 args = p.parse_args()
 
@@ -98,17 +99,25 @@ for data_label in args.data_label:
     print(len(pedigree.complete_trios())*3)
     print(len(pedigree.complete_trios())*3/len(vcf_samples))
 
-    #file_path = os.path.join(BASE_DIR, f"{data_label}.mendel_denovos.ht")
-    #if not file_exists(file_path):
-    #    print(f"{data_label}: Generating {file_path}")
-    #    denovos = compute_mendel_denovos(mt, pedigree)
-    #    denovos = denovos.checkpoint(file_path, overwrite=True, _read_if_exists=not force)
-    #else:
-    #    print(f"Reading table {file_path}")
-    #    denovos = hl.read_table(file_path)
+    if args.mendelian:
+        file_path = os.path.join(BASE_DIR, f"{data_label}.mendel_denovos.ht")
+        if not file_exists(file_path):
+            print(f"{data_label}: Generating {file_path}")
+            denovos = compute_mendel_denovos(mt, pedigree)
+            denovos = denovos.checkpoint(file_path, overwrite=True, _read_if_exists=not force)
+        else:
+            print(f"Reading table {file_path}")
+            denovos = hl.read_table(file_path)
 
-    file_path = os.path.join(BASE_DIR, f"{data_label}.samocha_denovos.ht")
-    denovos = compute_samocha_denovos(mt, pedigree)
+    else:
+        file_path = os.path.join(BASE_DIR, f"{data_label}.samocha_denovos.ht")
+        if not file_exists(file_path):
+            print(f"{data_label}: Generating {file_path}")
+            denovos = compute_samocha_denovos(mt, pedigree)
+            denovos = denovos.checkpoint(file_path, overwrite=True, _read_if_exists=not force)
+        else:
+            print(f"Reading table {file_path}")
+            denovos = hl.read_table(file_path)
 
     #file_path = os.path.join(BASE_DIR, f"{data_label}.mendel_denovos.vep.ht")
     #if not file_exists(file_path):
@@ -129,7 +138,7 @@ for data_label in args.data_label:
         
     joined_mt_rows = mt.rows()[(denovos.locus, denovos.alleles)]
 
-    file_path = os.path.join(BASE_DIR, f"{data_label}.de_novos_table.tsv")
+    file_path = os.path.join(BASE_DIR, f"{data_label}.mendel_de_novos_table.tsv")
     denovos = denovos.annotate(
         dataset=data_label,
         variant_type=get_expr_for_variant_type(denovos),
@@ -140,16 +149,19 @@ for data_label in args.data_label:
         QD=joined_mt_rows.info.QD)
 
     denovos = denovos.key_by()
-    denovos = denovos.select(
-        #'s',
-        'dataset',
-        'proband', 'father', 'mother',
-        # 'transcript_consequence_category',
-        'variant_type', 'AC', 'AF', 'QD', 'in_LCR', 'in_segdup',
-        #'mendel_code',
-        'proband_AB', 'proband_DP', 'proband_GQ',
-        'mother_AB', 'mother_DP', 'mother_GQ',
-        'father_AB', 'father_DP', 'father_GQ')
+    if args.mendelian:
+        denovos = denovos.select(
+            'dataset',
+            's', 'mendel_code',
+            'variant_type', 'AC', 'AF', 'QD', 'in_LCR', 'in_segdup')
+    else:
+        denovos = denovos.select(
+            'dataset',
+            'confidence',
+            'proband', 'father', 'mother', 'proband_AB', 'proband_DP', 'proband_GQ', 'mother_AB', 'mother_DP', 'mother_GQ', 'father_AB', 'father_DP', 'father_GQ'
+            #'transcript_consequence_category',
+            'variant_type', 'AC', 'AF', 'QD', 'in_LCR', 'in_segdup')
+
 
     denovos.export(file_path)
 
