@@ -141,7 +141,11 @@ for data_label in args.data_label:
 
     denovos = denovos.key_by()
     denovos = denovos.select(
-        's', 'variant_type', 'AC', 'AF', 'QD', 'transcript_consequence_category', 'in_LCR', 'in_segdup',
+        #'s',
+        'dataset',
+        'proband', 'father', 'mother',
+        # 'transcript_consequence_category',
+        'variant_type', 'AC', 'AF', 'QD', 'in_LCR', 'in_segdup',
         #'mendel_code',
         'proband_AB', 'proband_DP', 'proband_GQ',
         'mother_AB', 'mother_DP', 'mother_GQ',
