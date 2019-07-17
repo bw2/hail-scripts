@@ -138,7 +138,11 @@ for data_label in args.data_label:
         
     joined_mt_rows = mt.rows()[(denovos.locus, denovos.alleles)]
 
-    file_path = os.path.join(BASE_DIR, f"{data_label}.mendel_de_novos_table.tsv")
+    if args.mendelian:
+        file_path = os.path.join(BASE_DIR, f"{data_label}.mendel_de_novos_table.tsv")
+    else:
+        file_path = os.path.join(BASE_DIR, f"{data_label}.samocha_de_novos_table.tsv")
+
     denovos = denovos.annotate(
         dataset=data_label,
         variant_type=get_expr_for_variant_type(denovos),
@@ -158,7 +162,7 @@ for data_label in args.data_label:
         denovos = denovos.select(
             'dataset',
             'confidence',
-            'proband', 'father', 'mother', 'proband_AB', 'proband_DP', 'proband_GQ', 'mother_AB', 'mother_DP', 'mother_GQ', 'father_AB', 'father_DP', 'father_GQ'
+            'proband', 'father', 'mother', 'proband_AB', 'proband_DP', 'proband_GQ', 'mother_AB', 'mother_DP', 'mother_GQ', 'father_AB', 'father_DP', 'father_GQ',
             #'transcript_consequence_category',
             'variant_type', 'AC', 'AF', 'QD', 'in_LCR', 'in_segdup')
 
