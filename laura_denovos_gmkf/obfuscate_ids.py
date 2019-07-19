@@ -12,6 +12,10 @@ with open(sys.argv[1], "rt") as f, open(sys.argv[1].replace(".tsv", "") + ".obfu
             f2.write(line)
             continue
 
+        if "rgp" not in line.lower() and "gnomad" not in line.lower():
+            f2.write(line)
+            continue
+
         fields = line.split("\t")
         
         for i in [2,3,4]:

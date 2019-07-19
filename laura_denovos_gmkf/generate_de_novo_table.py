@@ -20,6 +20,14 @@ from hail_utils.denovos import compute_mendel_denovos, compute_samocha_denovos
 
 import argparse
 
+
+#rotate_by = 10
+#x = [chr(i) for i in range(32, 127)]
+#y = x[rotate_by:] + x[:rotate_by]
+
+#OBFUSCATE = hl.dict(dict(zip(x, y)))
+#print(OBFUSCATE)
+
 p = argparse.ArgumentParser()
 p.add_argument("--force", action="store_true")
 p.add_argument("--mendelian", action="store_true")
@@ -48,7 +56,7 @@ for data_label in args.data_label:
     mt_path = os.path.join(BASE_DIR, f"{data_label}.mt")
     print(mt_path)
 
-    filtered_mt = os.path.join(BASE_DIR, f"{data_label}.basic_filters.mt") 
+    filtered_mt = os.path.join(BASE_DIR, f"{data_label}.basic_filters.mt")
     if force or not file_exists(filtered_mt):
         print(f"{data_label}: Generating {filtered_mt}")
         mt = hl.import_vcf(VCF_PATH, force_bgz=True, min_partitions=10000, reference_genome="GRCh38")
@@ -66,7 +74,7 @@ for data_label in args.data_label:
         #mt = filter_out_segdups(mt)
         mt = annotate_in_LCR(mt)
         mt = annotate_in_segdup(mt)
-    
+
         mt = mt.checkpoint(filtered_mt, overwrite=force, _read_if_exists=not force)
 
     else:
@@ -81,7 +89,7 @@ for data_label in args.data_label:
     vcf_samples = mt.s.collect()
     imputed_sex = impute_sex(mt)
 
-    file_path = os.path.join(BASE_DIR, f"{data_label}.kinship.ht")  
+    file_path = os.path.join(BASE_DIR, f"{data_label}.kinship.ht")
     if not file_exists(file_path):
         print(f"{data_label}: Generating {file_path}")
         kin_ht = compute_kinship_ht(mt)
@@ -89,14 +97,15 @@ for data_label in args.data_label:
     else:
         print(f"Reading table {file_path}")
         kin_ht = hl.read_table(file_path)
-    
+
     print(f"{data_label}: infer families...")
     pedigree, duos, decisions = infer_families(kin_ht, imputed_sex)
-        
+
     pedigree = hl.Pedigree(pedigree.complete_trios())
     pedigree.write(os.path.join(BASE_DIR, f"{data_label}.pediree.fam"))
     pedigree.complete_trios()
 
+    print(f"{len(pedigree.complete_trios())} complete trios")
     print(len(pedigree.complete_trios())*3)
     print(len(pedigree.complete_trios())*3/len(vcf_samples))
 
@@ -130,23 +139,23 @@ for data_label in args.data_label:
         print(f"Reading table {file_path}")
         denovos = hl.read_table(file_path)
 
-
+    file_path = os.path.join(BASE_DIR, f"{data_label}.{algo_label}_de_novos_table.tsv")
     print(f"{data_label}: annotate and export {file_path}")
+
     denovos = denovos.annotate(sorted_transcript_consequences = get_expr_for_vep_sorted_transcript_consequences_array(denovos.vep))
-    denovos = denovos.annotate(transcript_consequence_terms = get_expr_for_vep_consequence_terms(denovos.sortedTranscriptConsequences))
+    denovos = denovos.annotate(transcript_consequence_terms = get_expr_for_vep_consequence_terms(denovos.sorted_transcript_consequences))
     denovos = denovos.annotate(transcript_consequence_categories = denovos.sorted_transcript_consequences.map(lambda c: c.category))
     denovos = denovos.annotate(transcript_consequence = hl.cond(hl.len(denovos.transcript_consequence_terms) > 0, denovos.transcript_consequence_terms[0], "other"))
     denovos = denovos.annotate(transcript_consequence_category = hl.cond(hl.len(denovos.transcript_consequence_categories) > 0, denovos.transcript_consequence_categories[0], "other"))
 
     joined_mt_rows = mt.rows()[(denovos.locus, denovos.alleles)]
 
-    gnomad_genomes = hl.read_table("gs://seqr-reference-data/GRCh38/gnomad/gnomad.genomes.r2.1.1.sites.liftover_grch38.ht")
     gnomad_exomes = hl.read_table("gs://seqr-reference-data/GRCh38/gnomad/gnomad.exomes.r2.1.1.sites.liftover_grch38.ht")
+    gnomad_genomes = hl.read_table("gs://seqr-reference-data/GRCh38/gnomad/gnomad.genomes.r2.1.1.sites.liftover_grch38.ht")
 
     joined_gnomad_genomes_ht = gnomad_genomes[(denovos.locus, denovos.alleles)]
     joined_gnomad_exomes_ht = gnomad_exomes[(denovos.locus, denovos.alleles)]
 
-    file_path = os.path.join(BASE_DIR, f"{data_label}.{algo_label}_de_novos_table.tsv")
     denovos = denovos.annotate(
         dataset=data_label,
         variant_type=get_expr_for_variant_type(denovos),
@@ -160,7 +169,28 @@ for data_label in args.data_label:
         gnomAD_genomes_AC = joined_gnomad_genomes_ht.freq[0].AC,
         gnomAD_exomes_AF = joined_gnomad_exomes_ht.freq[0].AF,
         gnomAD_exomes_AC = joined_gnomad_exomes_ht.freq[0].AC,
+        gnomAD_popmax_AF = hl.max(joined_gnomad_exomes_ht.popmax[0].AF, joined_gnomad_genomes_ht.popmax[0].AF),
     )
+
+    clinvar_ht = hl.read_table("gs://seqr-bw2/ref/GRCh38/clinvar_20190715.pathogenic.ht")
+    clinvar_ht = hl.split_multi_hts(clinvar_ht)
+    joined_clinvar_ht = clinvar_ht[(denovos.locus, denovos.alleles)]
+    denovos = denovos.annotate(
+        clinvar_alleleid = joined_clinvar_ht.info.ALLELEID,
+        clinvar_clnsig = hl.delimit(joined_clinvar_ht.info.CLNSIG, delimiter=','),
+        clinvar_revstat = hl.delimit(joined_clinvar_ht.info.CLNREVSTAT, delimiter=','),
+    )
+
+    #if args.mendelian:
+    #    denovos = denovos.annotate(
+    #        s = hl.delimit(denovos.s.split("").map(lambda l: OBFUSCATE[l]), ""),
+    #    )
+    #else:
+    #    denovos = denovos.annotate(
+    #        proband = hl.delimit(denovos.proband.split("").map(lambda l: OBFUSCATE[l]), ""),
+    #        father = hl.delimit(denovos.father.split("").map(lambda l: OBFUSCATE[l]), ""),
+    #        mother = hl.delimit(denovos.mother.split("").map(lambda l: OBFUSCATE[l]), ""),
+    #    )
 
     denovos = denovos.key_by()
     if args.mendelian:
@@ -175,9 +205,11 @@ for data_label in args.data_label:
             'confidence',
             'proband', 'father', 'mother', 'proband_AB', 'proband_DP', 'proband_GQ', 'mother_AB', 'mother_DP', 'mother_GQ', 'father_AB', 'father_DP', 'father_GQ',
             'transcript_consequence', 'transcript_consequence_category',
+            'clinvar_alleleid', 'clinvar_clnsig', 'clinvar_revstat',
+            'gnomAD_genomes_AF', 'gnomAD_genomes_AC', 'gnomAD_exomes_AF', 'gnomAD_exomes_AC', 'gnomAD_popmax_AF',
             'variant_type', 'filters', 'AC', 'AF', 'QD', 'in_LCR', 'in_segdup')
 
-
+    #print(denovos.show(5))
     denovos.export(file_path)
 
     print(f"Done with {data_label} {algo_label}!")
